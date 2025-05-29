@@ -12,10 +12,9 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
-            thread::get_dummy_threads,   // settingモジュールではなくmainにあると仮定
-            thread::get_dummy_responses, // settingモジュールではなくmainにあると仮定
-            setting::get_settings,       // settingモジュールにあると仮定
-            setting::save_settings       // settingモジュールにあると仮定
+            setting::get_settings,  // settingモジュールにあると仮定
+            setting::save_settings, // settingモジュールにあると仮定
+            thread::fetch_threads
         ])
         .setup(|app| {
             let app_handle = app.handle(); // AppHandle を取得
