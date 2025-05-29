@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ja">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>設定</title>
+        <link rel="stylesheet" href="styles.css" />
+        <style>
+            body {
+                padding: 20px;
+                font-family: sans-serif;
+            }
+            .setting-group {
+                margin-bottom: 20px;
+            }
+            .setting-group label {
+                display: block;
+                margin-bottom: 5px;
+                font-weight: bold;
+            }
+            select,
+            input[type="number"] {
+                padding: 8px;
+                border-radius: 4px;
+                border: 1px solid #ccc;
+                width: 100%;
+                box-sizing: border-box;
+            }
+            .actions {
+                margin-top: 30px;
+                text-align: right;
+            } /* ボタンが一つになっても右寄せが維持される想定 */
+            button {
+                padding: 10px 15px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                margin-left: 10px;
+            }
+            button.primary {
+                background-color: #007bff;
+                color: white;
+            }
+            /* button.secondary のスタイル定義は不要になるかもしれません */
+        </style>
+    </head>
+    <body>
+        <h1>設定</h1>
+
+        <div class="setting-group">
+            <label for="theme-select">テーマ:</label>
+            <select id="theme-select">
+                <option value="light">ライト</option>
+                <option value="dark">ダーク</option>
+            </select>
+        </div>
+
+        <div class="setting-group">
+            <label for="font-size-input">フォントサイズ (px):</label>
+            <input
+                type="number"
+                id="font-size-input"
+                min="8"
+                max="32"
+                value="14"
+            />
+        </div>
+
+        <div class="actions">
+            <button id="save-button" class="primary">保存</button>
+        </div>
+
+        <script type="module" src="settings.js"></script>
+    </body>
+</html>

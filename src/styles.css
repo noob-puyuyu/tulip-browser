@@ -1,0 +1,154 @@
+/* 基本スタイル */
+body, html {
+  margin: 0;
+  padding: 0;
+  height: 100vh; /* ビューポートの高さ全体を使用 */
+  font-family: sans-serif;
+  overflow: hidden; /* スクロールバーをコンテナ内で管理 */
+  background-color: #f4f4f4;
+}
+
+.container {
+  display: flex;
+  height: 100%;
+}
+
+/* 左側のスレッド一覧パネル */
+.sidebar {
+  width: 40%; /* 初期幅 */
+  min-width: 250px; /* 最小幅 */
+  max-width: 80%; /* 最大幅 */
+  background-color: #e9ecef;
+  padding: 15px;
+  overflow-y: auto; /* スレッドが多い場合にスクロール可能にする */
+  resize: horizontal; /* 水平方向のリサイズを許可 */
+  overflow-x: hidden; /* リサイズハンドル表示のため */
+  border-right: 2px solid #ced4da; /* リサイズ部分の境界線 */
+  box-sizing: border-box;
+}
+
+#thread-list {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* 各スレッドタイルのスタイル */
+.thread-item {
+  background-color: #ffffff;
+  border: 1px solid #dee2e6;
+  border-radius: 5px;
+  padding: 12px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.thread-item:hover {
+  background-color: #f8f9fa;
+}
+
+.thread-header {
+  font-size: 0.75em;
+  color: #6c757d;
+  margin-bottom: 8px;
+}
+
+.thread-content {
+  display: flex;
+  justify-content: space-between; /* タイトルとレス数を両端に配置 */
+  align-items: center;
+}
+
+.thread-title {
+  font-size: 0.95em;
+  font-weight: bold;
+  color: #212529;
+  margin-right: 10px; /* タイトルとレス数の間に余白 */
+
+  /* 以下の3行を変更または削除して折り返しを有効にします */
+  /* overflow: hidden; */      /* コメントアウトまたは削除 */
+  /* text-overflow: ellipsis; */ /* コメントアウトまたは削除 */
+  /* white-space: nowrap; */   /* コメントアウトまたは削除 */
+
+  /* 折り返しを許可する設定 */
+  white-space: normal; /* または "pre-wrap" など、状況に応じて */
+  word-break: break-word; /* URLや長い英単語などがはみ出さないように、単語の途中でも折り返す */
+  /* overflow-wrap: break-word; も同様の効果がありますが、word-breakの方が効く場面もあります */
+}
+
+
+.thread-response-count {
+  font-size: 0.9em;
+  color: #495057;
+  white-space: nowrap; /* レス数が改行されないように */
+  background-color: #e9ecef;
+  padding: 3px 8px;
+  border-radius: 3px;
+}
+
+/* 右側のメインコンテンツエリア */
+.main-content {
+  flex-grow: 1; /* 残りのスペースをすべて使用 */
+  padding: 20px;
+  background-color: #ffffff;
+  overflow-y: auto;
+}
+
+/* 右側のメインコンテンツエリア */
+.main-content {
+  flex-grow: 1;
+  padding: 20px;
+  background-color: #ffffff;
+  overflow-y: auto;
+}
+
+#current-thread-title {
+  margin-top: 0;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eee;
+  font-size: 1.4em;
+  color: #333;
+}
+
+#response-list {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* 各レスポンスアイテムのスタイル */
+.response-item {
+  background-color: #f9f9f9;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 15px;
+  margin-bottom: 12px;
+}
+
+.response-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 0.85em;
+  color: #555;
+}
+
+.response-author {
+  font-weight: bold;
+}
+
+.response-created-at {
+  color: #777;
+}
+
+.response-content {
+  font-size: 0.95em;
+  line-height: 1.6;
+  color: #333;
+  white-space: pre-wrap; /* 改行を保持し、必要に応じて折り返す */
+  word-break: break-word;
+}
