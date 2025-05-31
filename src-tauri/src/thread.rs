@@ -1,10 +1,6 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
-use encoding_rs;
+use html_escape::decode_html_entities;
 use serde::{Deserialize, Deserializer, Serialize};
-#[allow(unused_imports)]
-use std::fs;
-#[allow(unused_imports)]
-use tauri::{AppHandle, Wry};
 
 // APIから直接受け取るJSONの各要素に対応する構造体
 #[derive(Deserialize, Debug, Clone)]
@@ -71,8 +67,7 @@ pub struct ResponseItem {
 
 #[tauri::command]
 pub async fn fetch_threads() -> Result<Vec<ThreadItem>, String> {
-    // board_id 引数を削除
-    let json_url = "https://tulipplantation.com/tulipplantation/subject.json"; // 提供されたURLを使用
+    let json_url = "https://tulipplantation.com/tulipplantation/subject.json";
     println!(
         "[Rust fetch_threads] スレッド一覧を取得します: {}",
         json_url
@@ -80,9 +75,10 @@ pub async fn fetch_threads() -> Result<Vec<ThreadItem>, String> {
 
     let client = reqwest::Client::new();
     let api_items_result = match client.get(json_url).send().await {
+        // ... (HTTPリクエストとエラーハンドリング部分は変更なし) ...
         Ok(response) => {
             if response.status().is_success() {
-                response.json::<Vec<ApiThreadItem>>().await // Vec<ApiThreadItem> でデシリアライズ
+                response.json::<Vec<ApiThreadItem>>().await
             } else {
                 let err_msg = format!("HTTPエラー: {} (URL: {})", response.status(), json_url);
                 eprintln!("[Rust fetch_threads] {}", err_msg);
@@ -99,7 +95,6 @@ pub async fn fetch_threads() -> Result<Vec<ThreadItem>, String> {
     let api_items = match api_items_result {
         Ok(items) => items,
         Err(e) => {
-            // reqwest::Error は直接 String にならないため、e.to_string() または format! を使う
             let err_msg = format!(
                 "JSONのパースまたはリクエスト内容のエラー (URL: {}): {}",
                 json_url, e
@@ -109,14 +104,15 @@ pub async fn fetch_threads() -> Result<Vec<ThreadItem>, String> {
         }
     };
 
-    // ApiThreadItem からフロントエンド用の ThreadItem に変換
+    // ApiThreadItem からフロントエンド用の ThreadItem に変換する際にタイトルをデコード
     let threads: Vec<ThreadItem> = api_items
         .into_iter()
         .map(|api_item| ThreadItem {
-            id: api_item.thread, // カスタムデシリアライザにより既に文字列
-            title: api_item.title,
+            id: api_item.thread,
+            // ★★★ HTMLエンティティをデコード ★★★
+            title: decode_html_entities(&api_item.title).into_owned(),
             response_count: api_item.number,
-            created_at: format_timestamp_from_i64(api_item.date), // タイムスタンプをフォーマット
+            created_at: format_timestamp_from_i64(api_item.date),
         })
         .collect();
 
@@ -153,11 +149,13 @@ pub async fn fetch_thread_content(thread_id: String) -> Result<Vec<ResponseItem>
     );
 
     let client = reqwest::Client::new();
+    // HTTPリクエストを行い、レスポンスを取得
     let response = match client.get(&dat_file_url).send().await {
         Ok(resp) => resp,
         Err(e) => return Err(format!("リクエスト失敗 (URL: {}): {}", dat_file_url, e)),
     };
 
+    // HTTPステータスコードを確認
     if !response.status().is_success() {
         return Err(format!(
             "HTTPエラー {} (URL: {})",
@@ -166,7 +164,7 @@ pub async fn fetch_thread_content(thread_id: String) -> Result<Vec<ResponseItem>
         ));
     }
 
-    // ★★★ Shift_JISデコード処理を削除し、UTF-8テキストとして取得 ★★★
+    // ★★★ レスポンスボディをUTF-8文字列として取得 ★★★
     let content_str = match response.text().await {
         Ok(text) => text,
         Err(e) => {
@@ -183,17 +181,19 @@ pub async fn fetch_thread_content(thread_id: String) -> Result<Vec<ResponseItem>
         if line.trim().is_empty() {
             continue;
         }
-        let parts: Vec<&str> = line.splitn(4, "<>").collect();
+        // splitn(5, "<>") を使用して、本文とタイトル(もしあれば)を分離
+        let parts: Vec<&str> = line.splitn(5, "<>").collect();
 
         if parts.len() >= 4 {
+            // 本文(parts[3])までは必須
             let name = parts[0].to_string();
             let mail = parts[1].to_string();
             let date_and_id_full = parts[2].to_string();
-            let body = parts[3].to_string();
+            let body = parts[3].to_string(); // parts[3] が純粋な本文
 
+            // ... (日付とID情報のパース部分は変更なし) ...
             let mut date_str = date_and_id_full.clone();
             let mut id_info_str = "".to_string();
-
             if let Some(id_pos) = date_and_id_full.rfind(" ID:") {
                 date_str = date_and_id_full[..id_pos].trim().to_string();
                 id_info_str = date_and_id_full[id_pos..].trim().to_string();
