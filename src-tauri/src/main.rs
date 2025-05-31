@@ -15,7 +15,8 @@ fn main() {
             setting::get_settings,  // settingモジュールにあると仮定
             setting::save_settings, // settingモジュールにあると仮定
             thread::fetch_threads,
-            thread::fetch_thread_content
+            thread::fetch_thread_content,
+            thread::fetch_image_as_base64
         ])
         .setup(|app| {
             let app_handle = app.handle(); // AppHandle を取得

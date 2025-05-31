@@ -1,22 +1,25 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>掲示板ビューワー</title>
-  <link rel="stylesheet" href="styles.css" />
-</head>
-<body>
-  <div class="container">
-    <div class="sidebar" id="thread-list-panel">
-      <ul id="thread-list"></ul>
-    </div>
-    <div class="main-content" id="main-content-area">
-      <p id="main-content-placeholder">スレッドを選択してください。</p>
-      <h2 id="current-thread-title" style="display: none;"></h2>
-      <ul id="response-list"></ul>
-    </div>
-  </div>
-  <script type="module" src="main.js"></script>
-</body>
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>掲示板ビューワー</title>
+        <link rel="stylesheet" href="styles.css" />
+    </head>
+    <body>
+        <div class="container">
+            <div class="sidebar" id="thread-list-panel">
+                <ul id="thread-list"></ul>
+            </div>
+            <div class="resizer-x" id="dragHandleX"></div>
+            <div class="main-content" id="main-content-area">
+                <p id="main-content-placeholder">
+                    スレッドを選択してください。
+                </p>
+                <h2 id="current-thread-title" style="display: none"></h2>
+                <ul id="response-list"></ul>
+            </div>
+        </div>
+        <script type="module" src="main.js"></script>
+    </body>
 </html>

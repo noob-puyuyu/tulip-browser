@@ -16,7 +16,7 @@
       }
     ],
     "security": {
-      "csp": null,
+    "csp": "default-src 'self' tauri:; connect-src 'self' tauri: https://tulipplantation.com; img-src 'self' asset: tauri: https://i.imgur.com https://imgur.com data:;"
     }
   },
   "bundle": {

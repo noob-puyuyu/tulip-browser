@@ -1,6 +1,9 @@
-use chrono::{DateTime, NaiveDateTime, Utc};
+use base64::{engine::general_purpose::STANDARD as Base64Standard, Engine as _};
+use chrono::DateTime;
+use chrono_tz::Asia::Tokyo;
 use html_escape::decode_html_entities;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashMap;
 
 // APIから直接受け取るJSONの各要素に対応する構造体
 #[derive(Deserialize, Debug, Clone)]
@@ -41,15 +44,14 @@ pub struct ThreadItem {
     created_at: String,  // フォーマットされた日時文字列 (ここではAPIの 'date' を使用)
 }
 
-// Unixタイムスタンプ (i64) を "YYYY/MM/DD HH:MM" 形式の文字列に変換するヘルパー関数
+// Unixタイムスタンプ (i64) を "YYYY/MM/DD HH:MM" 形式のJST日時文字列に変換するヘルパー関数
 fn format_timestamp_from_i64(timestamp_secs: i64) -> String {
-    if let Some(naive_dt) = NaiveDateTime::from_timestamp_opt(timestamp_secs, 0) {
-        let datetime_utc: DateTime<Utc> = DateTime::from_naive_utc_and_offset(naive_dt, Utc);
-        // 必要であればここで日本時間 (JST) に変換
-        // use chrono_tz::Asia::Tokyo;
-        // let datetime_jst = datetime_utc.with_timezone(&Tokyo);
-        // return datetime_jst.format("%Y/%m/%d %H:%M").to_string();
-        return datetime_utc.format("%Y/%m/%d %H:%M").to_string(); // UTCのまま表示
+    // DateTime::from_timestamp は DateTime<Utc> を返す
+    if let Some(datetime_utc) = DateTime::from_timestamp(timestamp_secs, 0) {
+        // UTCのDateTimeをJST (Asia/Tokyo) のDateTimeに変換
+        let datetime_jst = datetime_utc.with_timezone(&Tokyo);
+        // JSTのDateTimeを指定されたフォーマットの文字列に変換
+        return datetime_jst.format("%Y/%m/%d %H:%M").to_string();
     }
     "日付不明".to_string()
 }
@@ -60,9 +62,14 @@ pub struct ResponseItem {
     id: String,           // レス番号 (例: "1", "2")
     author: String,       // 名前欄
     mail: String,         // メール欄
-    created_at: String,   // 日付とIDとBE等を含む文字列全体、またはパースした日付部分
-    user_id_info: String, // IDやBEなどの部分
+    created_at: String,   // パースされた日付部分の文字列
+    user_id_info: String, // "ID:xxxx主" のような、表示用のID文字列全体
     content: String,      // 本文 (HTMLが含まれる)
+
+    // ★★★ IDカウンター用に新しいフィールドを追加 ★★★
+    parsed_user_id: Option<String>, // パースされた実際のID部分 (例: "R780OCsAQ")、IDがない場合は None
+    id_occurrence_count: u32,       // このレスが、このIDによる何回目の投稿か
+    id_total_count: u32,            // このIDがこのスレッドで行った総投稿数
 }
 
 #[tauri::command]
@@ -126,112 +133,193 @@ pub async fn fetch_threads() -> Result<Vec<ThreadItem>, String> {
 #[tauri::command]
 pub async fn fetch_thread_content(thread_id: String) -> Result<Vec<ResponseItem>, String> {
     if thread_id.is_empty() {
+        /* ... エラー処理 ... */
         return Err("スレッドIDが指定されていません。".to_string());
     }
-
     let dir_prefix = if thread_id.len() >= 4 {
         &thread_id[0..4]
     } else {
-        return Err(format!(
-            "スレッドID '{}' が短すぎるため、ディレクトリを特定できません。",
-            thread_id
-        ));
+        /* ... エラー処理 ... */
+        return Err("スレッドIDが短すぎます".to_string());
     };
-
     let dat_file_url = format!(
+        /* ... URL生成 ... */
         "https://tulipplantation.com/tulipplantation/thread/{}/{}.dat",
         dir_prefix, thread_id
     );
-
     println!(
         "[Rust fetch_thread_content] スレッド内容を取得します (ID: {}): {}",
         thread_id, dat_file_url
     );
 
     let client = reqwest::Client::new();
-    // HTTPリクエストを行い、レスポンスを取得
     let response = match client.get(&dat_file_url).send().await {
-        Ok(resp) => resp,
-        Err(e) => return Err(format!("リクエスト失敗 (URL: {}): {}", dat_file_url, e)),
+        /* ... HTTP GET ... */ Ok(r) => r,
+        Err(e) => return Err(e.to_string()),
     };
-
-    // HTTPステータスコードを確認
     if !response.status().is_success() {
-        return Err(format!(
-            "HTTPエラー {} (URL: {})",
-            response.status(),
-            dat_file_url
-        ));
+        /* ... HTTPエラー処理 ... */
+        return Err(response.status().to_string());
     }
-
-    // ★★★ レスポンスボディをUTF-8文字列として取得 ★★★
     let content_str = match response.text().await {
-        Ok(text) => text,
-        Err(e) => {
-            return Err(format!(
-                "レスポンス内容のテキスト取得に失敗しました (URL: {}): {}",
-                dat_file_url, e
-            ))
-        }
+        /* ... UTF-8としてテキスト取得 ... */ Ok(t) => t,
+        Err(e) => return Err(e.to_string()),
     };
 
-    // 以下の行のパース処理は、UTF-8文字列を前提としているため変更ありません
-    let mut responses: Vec<ResponseItem> = Vec::new();
-    for (index, line) in content_str.lines().enumerate() {
+    let mut temp_responses: Vec<TempResponseData> = Vec::new();
+    let mut id_total_counts: HashMap<String, u32> = HashMap::new();
+
+    // 1回目のパース: 基本情報抽出とIDの総出現回数のカウント
+    for line in content_str.lines() {
         if line.trim().is_empty() {
             continue;
         }
-        // splitn(5, "<>") を使用して、本文とタイトル(もしあれば)を分離
         let parts: Vec<&str> = line.splitn(5, "<>").collect();
-
         if parts.len() >= 4 {
-            // 本文(parts[3])までは必須
             let name = parts[0].to_string();
             let mail = parts[1].to_string();
             let date_and_id_full = parts[2].to_string();
-            let body = parts[3].to_string(); // parts[3] が純粋な本文
+            let body = parts[3].to_string();
 
-            // ... (日付とID情報のパース部分は変更なし) ...
             let mut date_str = date_and_id_full.clone();
-            let mut id_info_str = "".to_string();
+            let mut user_id_info_str = "".to_string();
             if let Some(id_pos) = date_and_id_full.rfind(" ID:") {
                 date_str = date_and_id_full[..id_pos].trim().to_string();
-                id_info_str = date_and_id_full[id_pos..].trim().to_string();
-            } else {
-                if let Some(last_space_pos) = date_and_id_full.rfind(' ') {
-                    let potential_date = date_and_id_full[..last_space_pos].trim();
-                    if potential_date
-                        .matches(|c: char| c == '/' || c == ':')
-                        .count()
-                        >= 4
-                    {
-                        date_str = potential_date.to_string();
-                        id_info_str = date_and_id_full[last_space_pos..].trim().to_string();
-                    }
-                }
+                user_id_info_str = date_and_id_full[id_pos..].trim().to_string();
+            } else { /* ... 他の heuristic ... */
             }
 
-            responses.push(ResponseItem {
-                id: (index + 1).to_string(),
-                author: name,
+            let parsed_id = parse_actual_id_from_info_str(&user_id_info_str);
+            if let Some(ref id) = parsed_id {
+                *id_total_counts.entry(id.clone()).or_insert(0) += 1;
+            }
+
+            temp_responses.push(TempResponseData {
+                name,
                 mail,
-                created_at: date_str,
-                user_id_info: id_info_str,
-                content: body,
+                date_str,
+                user_id_info: user_id_info_str,
+                parsed_user_id: parsed_id,
+                body,
             });
-        } else {
-            println!(
-                "[Rust fetch_thread_content] 行のパースに失敗 (パーツ数 {}): {}",
-                parts.len(),
-                line
-            );
+        } else { /* ... パース失敗ログ ... */
         }
     }
 
+    let mut final_responses: Vec<ResponseItem> = Vec::new();
+    let mut id_current_occurrences: HashMap<String, u32> = HashMap::new();
+
+    // 2回目の処理: ResponseItem の作成と、IDの現在の出現回数のカウント
+    for (index, temp_res) in temp_responses.into_iter().enumerate() {
+        let mut occurrence = 0;
+        let mut total = 0;
+
+        if let Some(ref parsed_id_val) = temp_res.parsed_user_id {
+            let current_count_for_id = id_current_occurrences
+                .entry(parsed_id_val.clone())
+                .or_insert(0);
+            *current_count_for_id += 1;
+            occurrence = *current_count_for_id;
+            total = *id_total_counts.get(parsed_id_val).unwrap_or(&0); // total_counts には必ずあるはず
+        }
+
+        final_responses.push(ResponseItem {
+            id: (index + 1).to_string(),
+            author: temp_res.name,
+            mail: temp_res.mail,
+            created_at: temp_res.date_str,
+            user_id_info: temp_res.user_id_info,
+            content: temp_res.body,
+            parsed_user_id: temp_res.parsed_user_id, // これも渡す
+            id_occurrence_count: occurrence,
+            id_total_count: total,
+        });
+    }
+
     println!(
-        "[Rust fetch_thread_content] {} 個のレスをパースしました (スレッドID: {})",
-        responses.len(),
+        "[Rust fetch_thread_content] {} 個のレスを処理完了 (スレッドID: {})",
+        final_responses.len(),
         thread_id
     );
-    Ok(responses)
+    Ok(final_responses)
+}
+
+#[tauri::command]
+pub async fn fetch_image_as_base64(url: String) -> Result<String, String> {
+    println!("[Rust fetch_image_as_base64] 画像を取得します: {}", url);
+
+    let client = reqwest::Client::new();
+    let response = match client
+        .get(&url)
+        // Imgurが特定のUser-Agentを要求する可能性は低いですが、念のため一般的なものを設定するのも一手
+        // .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36")
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            let err_msg = format!("画像リクエストに失敗しました (URL: {}): {}", url, e);
+            eprintln!("[Rust fetch_image_as_base64] {}", err_msg);
+            return Err(err_msg);
+        }
+    };
+
+    if !response.status().is_success() {
+        let err_msg = format!(
+            "画像リクエストでHTTPエラー {} (URL: {})",
+            response.status(),
+            url
+        );
+        eprintln!("[Rust fetch_image_as_base64] {}", err_msg);
+        return Err(err_msg);
+    }
+
+    // Content-TypeヘッダーからMIMEタイプを取得 (例: "image/jpeg", "image/png")
+    // 取得できない場合のフォールバックとして "image/jpeg" を使用
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("image/jpeg") // デフォルト、またはURLの拡張子から判定するロジックを追加しても良い
+        .to_string();
+
+    let image_bytes = match response.bytes().await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            let err_msg = format!("画像データのバイト取得に失敗しました (URL: {}): {}", url, e);
+            eprintln!("[Rust fetch_image_as_base64] {}", err_msg);
+            return Err(err_msg);
+        }
+    };
+
+    // Base64エンコード
+    let base64_encoded = Base64Standard.encode(&image_bytes);
+    let data_url = format!("data:{};base64,{}", content_type, base64_encoded);
+
+    Ok(data_url)
+}
+
+fn parse_actual_id_from_info_str(user_id_info_str: &str) -> Option<String> {
+    if let Some(id_start_idx) = user_id_info_str.find("ID:") {
+        let after_id_colon = &user_id_info_str[id_start_idx + 3..];
+        // ID部分の終わりを見つける (スペース、(、[ などが区切りになることが多い)
+        let id_end_idx = after_id_colon
+            .find(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
+            .unwrap_or(after_id_colon.len());
+        let actual_id = after_id_colon[..id_end_idx].to_string();
+        if !actual_id.is_empty() {
+            return Some(actual_id);
+        }
+    }
+    None
+}
+
+#[derive(Debug)]
+struct TempResponseData {
+    name: String,
+    mail: String,
+    date_str: String,               // パースされた日付部分
+    user_id_info: String,           // IDなどを含む文字列全体
+    parsed_user_id: Option<String>, // パースされた実際のID
+    body: String,
 }
