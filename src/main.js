@@ -62,34 +62,33 @@ function addThreadToView(thread) {
 }
 
 // 特定スレッドのレスポンスをメインコンテンツエリアに表示する関数
+// 特定スレッドのレスポンスをメインコンテンツエリアに表示する関数を修正
 async function displayThreadResponses(threadId, threadTitle) {
   if (typeof invoke !== "function") {
     console.error("[JS] Error: 'invoke' is not a function or not defined!");
-    responseListElement.innerHTML =
-      "<li>アプリケーションの初期化に問題があります。</li>";
-    mainContentPlaceholder.style.display = "none";
-    currentThreadTitleElement.style.display = "none";
+    // ... (エラー表示処理) ...
     return;
   }
 
-  // 以前のレスポンスをクリア
+  // 以前のレスポンスをクリアし、タイトルを表示
   responseListElement.innerHTML = "";
-  // 初期メッセージを隠し、タイトルを表示
   mainContentPlaceholder.style.display = "none";
   currentThreadTitleElement.textContent = threadTitle;
   currentThreadTitleElement.style.display = "block";
 
   try {
     console.log(
-      `[JS] Invoking 'get_dummy_responses' for threadId: ${threadId}`,
+      `[JS] Invoking 'fetch_thread_content' for threadId: ${threadId}`,
     );
-    const responses = await invoke("get_dummy_responses", {
+    // ★★★ コマンド名と引数を変更 ★★★
+    const responses = await invoke("fetch_thread_content", {
       threadId: threadId,
     });
     console.log("[JS] Responses received from Rust:", responses);
 
     if (responses && responses.length > 0) {
       responses.forEach((response) => {
+        // response は ResponseItem 型のオブジェクト
         const resItem = document.createElement("li");
         resItem.classList.add("response-item");
 
@@ -98,18 +97,30 @@ async function displayThreadResponses(threadId, threadTitle) {
 
         const authorSpan = document.createElement("span");
         authorSpan.classList.add("response-author");
-        authorSpan.textContent = response.author || "名無しさん"; // authorがない場合のフォールバック
+        authorSpan.textContent = response.author || "名無しさん";
 
-        const createdAtSpan = document.createElement("span");
-        createdAtSpan.classList.add("response-created-at");
-        createdAtSpan.textContent = response.created_at;
+        // メール欄を表示する場合 (任意)
+        if (response.mail) {
+          const mailLink = document.createElement("a");
+          mailLink.href = `mailto:${response.mail}`;
+          mailLink.textContent = `[${response.mail}]`;
+          mailLink.style.marginLeft = "5px"; // 適当なスタイル
+          authorSpan.appendChild(mailLink);
+        }
+
+        const dateAndIdSpan = document.createElement("span");
+        dateAndIdSpan.classList.add("response-created-at"); // CSSクラス名はそのまま利用
+        // created_at には日付部分、user_id_info にはID部分が入る想定
+        dateAndIdSpan.textContent =
+          `${response.created_at} ${response.user_id_info || ""}`.trim();
 
         resHeader.appendChild(authorSpan);
-        resHeader.appendChild(createdAtSpan);
+        resHeader.appendChild(dateAndIdSpan);
 
         const resContent = document.createElement("div");
         resContent.classList.add("response-content");
-        resContent.textContent = response.content;
+        // 本文はHTMLとして解釈・挿入する (サニタイズが必要な場合は別途処理)
+        resContent.innerHTML = response.content; // ★★★ .textContent から .innerHTML に変更 ★★★
 
         resItem.appendChild(resHeader);
         resItem.appendChild(resContent);
@@ -117,7 +128,7 @@ async function displayThreadResponses(threadId, threadTitle) {
       });
     } else {
       responseListElement.innerHTML =
-        "<li>このスレッドにはまだレスポンスがありません。</li>";
+        "<li>このスレッドにはレスポンスがありません。</li>";
     }
   } catch (error) {
     console.error(
@@ -125,33 +136,22 @@ async function displayThreadResponses(threadId, threadTitle) {
       error,
     );
     responseListElement.innerHTML = `<li>レスポンスの読み込みに失敗しました。<br>${error}</li>`;
-    // エラー時もタイトルは表示したままにするか、初期状態に戻すか選択
-    // currentThreadTitleElement.style.display = 'none';
-    // mainContentPlaceholder.style.display = 'block';
   }
 }
 
-// ダミースレッド一覧を読み込んで表示する関数を修正
 async function loadAndDisplayThreads() {
   console.log("[JS] loadAndDisplayThreads called");
-  if (!threadListElement) {
-    console.error("[JS] Error: threadListElement is not found!");
-    return;
-  }
-  if (typeof invoke !== "function") {
+  if (!threadListElement || typeof invoke !== "function") {
     console.error(
-      "[JS] Error: 'invoke' is not a function or not defined during loadAndDisplayThreads!",
+      "[JS] Error: threadListElement or invoke function is not available!",
     );
-    threadListElement.innerHTML =
-      "<li>アプリケーションの初期化に問題があります。</li>";
+    threadListElement.innerHTML = "<li>初期化エラーが発生しました。</li>";
     return;
   }
+
   try {
-    // ★★★ コマンド名を 'fetch_threads' に変更 ★★★
-    console.log(
-      "[JS] Invoking 'fetch_threads' to get thread list from file...",
-    );
-    const threads = await invoke("fetch_threads"); // 引数なし
+    console.log("[JS] Invoking 'fetch_threads' to get thread list from URL...");
+    const threads = await invoke("fetch_threads"); // ★★★ 引数を削除 ★★★
     console.log("[JS] Threads received from Rust (fetch_threads):", threads);
 
     if (threads && threads.length > 0) {
@@ -165,7 +165,6 @@ async function loadAndDisplayThreads() {
       "[JS] スレッドの読み込みに失敗しました (fetch_threads):",
       error,
     );
-    // エラーメッセージを画面に表示
     threadListElement.innerHTML = `<li>スレッドの読み込みに失敗しました。<br>エラー: ${error}</li>`;
   }
 }
