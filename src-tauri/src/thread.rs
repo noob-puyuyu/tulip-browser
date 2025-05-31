@@ -1,104 +1,237 @@
-use dirs;
-use serde::{Deserialize, Serialize};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use encoding_rs;
+use serde::{Deserialize, Deserializer, Serialize};
+#[allow(unused_imports)]
 use std::fs;
-use std::path::PathBuf;
+#[allow(unused_imports)]
 use tauri::{AppHandle, Wry};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ThreadItem {
-    id: String,
+// APIから直接受け取るJSONの各要素に対応する構造体
+#[derive(Deserialize, Debug, Clone)]
+struct ApiThreadItem {
+    // "thread" フィールドが数値または文字列の場合に対応するため、カスタムデシリアライザを使用
+    #[serde(deserialize_with = "deserialize_thread_id_to_string")]
+    thread: String, // スレッドIDを文字列として統一
     title: String,
-    response_count: u32,
-    created_at: String, // 表示用に文字列として定義
+    number: u32, // レス数
+    date: i64,   // Unixタイムスタンプ (最終更新日時など)
+}
+
+// "thread" フィールドのカスタムデシリアライザ
+// JSON内で数値でも文字列でも送られてくる可能性がある "thread" IDを常にStringとして読み込む
+fn deserialize_thread_id_to_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)] // 型が一致するものを試す
+    enum ThreadIdValue {
+        Str(String),
+        Num(serde_json::Number), // 数値をまずは serde_json::Number で受ける
+    }
+
+    match ThreadIdValue::deserialize(deserializer)? {
+        ThreadIdValue::Str(s) => Ok(s),
+        ThreadIdValue::Num(n) => Ok(n.to_string()), // 数値を文字列に変換
+    }
+}
+
+// フロントエンドに渡すためのスレッド情報の構造体 (既存のものを確認・使用)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ThreadItem {
+    id: String,          // スレッドID
+    title: String,       // タイトル
+    response_count: u32, // レス数
+    created_at: String,  // フォーマットされた日時文字列 (ここではAPIの 'date' を使用)
+}
+
+// Unixタイムスタンプ (i64) を "YYYY/MM/DD HH:MM" 形式の文字列に変換するヘルパー関数
+fn format_timestamp_from_i64(timestamp_secs: i64) -> String {
+    if let Some(naive_dt) = NaiveDateTime::from_timestamp_opt(timestamp_secs, 0) {
+        let datetime_utc: DateTime<Utc> = DateTime::from_naive_utc_and_offset(naive_dt, Utc);
+        // 必要であればここで日本時間 (JST) に変換
+        // use chrono_tz::Asia::Tokyo;
+        // let datetime_jst = datetime_utc.with_timezone(&Tokyo);
+        // return datetime_jst.format("%Y/%m/%d %H:%M").to_string();
+        return datetime_utc.format("%Y/%m/%d %H:%M").to_string(); // UTCのまま表示
+    }
+    "日付不明".to_string()
 }
 
 // レスポンスアイテムの構造体
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Clone)] // フロントエンドに渡すので Serialize は必須
 pub struct ResponseItem {
-    id: String,
-    author: String,
-    content: String,
-    created_at: String,
+    id: String,           // レス番号 (例: "1", "2")
+    author: String,       // 名前欄
+    mail: String,         // メール欄
+    created_at: String,   // 日付とIDとBE等を含む文字列全体、またはパースした日付部分
+    user_id_info: String, // IDやBEなどの部分
+    content: String,      // 本文 (HTMLが含まれる)
 }
 
-pub fn get_data_file_path(filename: &str) -> Result<PathBuf, String> {
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| "ユーザーの設定ディレクトリが見つかりませんでした。".to_string())?;
-    let app_config_subdir = config_dir.join("tulip-browser"); // 設定ファイルと同じディレクトリを使用
-    if !app_config_subdir.exists() {
-        std::fs::create_dir_all(&app_config_subdir).map_err(|e| {
-            format!(
-                "データ用ディレクトリ '{}' の作成に失敗しました: {}",
-                app_config_subdir.display(),
-                e
-            )
-        })?;
-    }
-    Ok(app_config_subdir.join(filename))
-}
-
-// 新しいTauriコマンド: スレッド一覧をファイルから取得
 #[tauri::command]
-pub async fn fetch_threads(app_handle: AppHandle<Wry>) -> Result<Vec<ThreadItem>, String> {
-    let data_file_name = "threads_mock.json";
-    let data_file_path = get_data_file_path(data_file_name)?;
-
+pub async fn fetch_threads() -> Result<Vec<ThreadItem>, String> {
+    // board_id 引数を削除
+    let json_url = "https://tulipplantation.com/tulipplantation/subject.json"; // 提供されたURLを使用
     println!(
-        "[Rust fetch_threads] スレッドデータをファイルから取得します: {}",
-        data_file_path.display()
+        "[Rust fetch_threads] スレッド一覧を取得します: {}",
+        json_url
     );
 
-    // もしファイルが存在しなければ、サンプルデータで作成
-    if !data_file_path.exists() {
-        println!(
-            "[Rust fetch_threads] {} が存在しないため、サンプルデータで作成します。",
-            data_file_path.display()
-        );
-        let sample_threads_json = r#"[
-          {
-            "id": "sample001",
-            "title": "サンプルスレッド１ (初回起動時作成)",
-            "response_count": 10,
-            "created_at": "2025/05/30 11:00"
-          },
-          {
-            "id": "sample002",
-            "title": "Tauri 機能テスト中",
-            "response_count": 5,
-            "created_at": "2025/05/30 11:05"
-          }
-        ]"#;
-        fs::write(&data_file_path, sample_threads_json).map_err(|e| {
-            format!(
-                "サンプルスレッドファイル '{}' の書き込みに失敗しました: {}",
-                data_file_path.display(),
-                e
-            )
-        })?;
-        println!("[Rust fetch_threads] サンプルスレッドファイルを作成しました。");
-    }
+    let client = reqwest::Client::new();
+    let api_items_result = match client.get(json_url).send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                response.json::<Vec<ApiThreadItem>>().await // Vec<ApiThreadItem> でデシリアライズ
+            } else {
+                let err_msg = format!("HTTPエラー: {} (URL: {})", response.status(), json_url);
+                eprintln!("[Rust fetch_threads] {}", err_msg);
+                return Err(err_msg);
+            }
+        }
+        Err(e) => {
+            let err_msg = format!("リクエストに失敗しました (URL: {}): {}", json_url, e);
+            eprintln!("[Rust fetch_threads] {}", err_msg);
+            return Err(err_msg);
+        }
+    };
 
-    // ファイルを読み込み
-    let data = fs::read_to_string(&data_file_path).map_err(|e| {
-        format!(
-            "スレッドファイル '{}' の読み込みに失敗しました: {}",
-            data_file_path.display(),
-            e
-        )
-    })?;
+    let api_items = match api_items_result {
+        Ok(items) => items,
+        Err(e) => {
+            // reqwest::Error は直接 String にならないため、e.to_string() または format! を使う
+            let err_msg = format!(
+                "JSONのパースまたはリクエスト内容のエラー (URL: {}): {}",
+                json_url, e
+            );
+            eprintln!("[Rust fetch_threads] {}", err_msg);
+            return Err(err_msg);
+        }
+    };
 
-    // JSONをパース
-    let threads: Vec<ThreadItem> = serde_json::from_str(&data).map_err(|e| {
-        format!(
-            "スレッドデータのJSONパースに失敗しました (ファイル: {}): {}",
-            data_file_path.display(),
-            e
-        )
-    })?;
+    // ApiThreadItem からフロントエンド用の ThreadItem に変換
+    let threads: Vec<ThreadItem> = api_items
+        .into_iter()
+        .map(|api_item| ThreadItem {
+            id: api_item.thread, // カスタムデシリアライザにより既に文字列
+            title: api_item.title,
+            response_count: api_item.number,
+            created_at: format_timestamp_from_i64(api_item.date), // タイムスタンプをフォーマット
+        })
+        .collect();
 
     println!(
-        "[Rust fetch_threads] {} 個のスレッドを読み込みました。",
+        "[Rust fetch_threads] {} 個のスレッドを取得・変換しました。",
         threads.len()
     );
     Ok(threads)
+}
+
+#[tauri::command]
+pub async fn fetch_thread_content(thread_id: String) -> Result<Vec<ResponseItem>, String> {
+    if thread_id.is_empty() {
+        return Err("スレッドIDが指定されていません。".to_string());
+    }
+
+    let dir_prefix = if thread_id.len() >= 4 {
+        &thread_id[0..4]
+    } else {
+        return Err(format!(
+            "スレッドID '{}' が短すぎるため、ディレクトリを特定できません。",
+            thread_id
+        ));
+    };
+
+    let dat_file_url = format!(
+        "https://tulipplantation.com/tulipplantation/thread/{}/{}.dat",
+        dir_prefix, thread_id
+    );
+
+    println!(
+        "[Rust fetch_thread_content] スレッド内容を取得します (ID: {}): {}",
+        thread_id, dat_file_url
+    );
+
+    let client = reqwest::Client::new();
+    let response = match client.get(&dat_file_url).send().await {
+        Ok(resp) => resp,
+        Err(e) => return Err(format!("リクエスト失敗 (URL: {}): {}", dat_file_url, e)),
+    };
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "HTTPエラー {} (URL: {})",
+            response.status(),
+            dat_file_url
+        ));
+    }
+
+    // ★★★ Shift_JISデコード処理を削除し、UTF-8テキストとして取得 ★★★
+    let content_str = match response.text().await {
+        Ok(text) => text,
+        Err(e) => {
+            return Err(format!(
+                "レスポンス内容のテキスト取得に失敗しました (URL: {}): {}",
+                dat_file_url, e
+            ))
+        }
+    };
+
+    // 以下の行のパース処理は、UTF-8文字列を前提としているため変更ありません
+    let mut responses: Vec<ResponseItem> = Vec::new();
+    for (index, line) in content_str.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.splitn(4, "<>").collect();
+
+        if parts.len() >= 4 {
+            let name = parts[0].to_string();
+            let mail = parts[1].to_string();
+            let date_and_id_full = parts[2].to_string();
+            let body = parts[3].to_string();
+
+            let mut date_str = date_and_id_full.clone();
+            let mut id_info_str = "".to_string();
+
+            if let Some(id_pos) = date_and_id_full.rfind(" ID:") {
+                date_str = date_and_id_full[..id_pos].trim().to_string();
+                id_info_str = date_and_id_full[id_pos..].trim().to_string();
+            } else {
+                if let Some(last_space_pos) = date_and_id_full.rfind(' ') {
+                    let potential_date = date_and_id_full[..last_space_pos].trim();
+                    if potential_date
+                        .matches(|c: char| c == '/' || c == ':')
+                        .count()
+                        >= 4
+                    {
+                        date_str = potential_date.to_string();
+                        id_info_str = date_and_id_full[last_space_pos..].trim().to_string();
+                    }
+                }
+            }
+
+            responses.push(ResponseItem {
+                id: (index + 1).to_string(),
+                author: name,
+                mail,
+                created_at: date_str,
+                user_id_info: id_info_str,
+                content: body,
+            });
+        } else {
+            println!(
+                "[Rust fetch_thread_content] 行のパースに失敗 (パーツ数 {}): {}",
+                parts.len(),
+                line
+            );
+        }
+    }
+
+    println!(
+        "[Rust fetch_thread_content] {} 個のレスをパースしました (スレッドID: {})",
+        responses.len(),
+        thread_id
+    );
+    Ok(responses)
 }

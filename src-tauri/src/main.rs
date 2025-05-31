@@ -14,7 +14,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             setting::get_settings,  // settingモジュールにあると仮定
             setting::save_settings, // settingモジュールにあると仮定
-            thread::fetch_threads
+            thread::fetch_threads,
+            thread::fetch_thread_content
         ])
         .setup(|app| {
             let app_handle = app.handle(); // AppHandle を取得
